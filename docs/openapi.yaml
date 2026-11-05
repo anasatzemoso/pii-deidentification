@@ -1,0 +1,239 @@
+openapi: 3.1.0
+info:
+  title: PII De-identification Service API
+  version: 0.1.0
+  description: >
+    Rule-based service for de-identifying personally identifiable information
+    (PII) in free text. Detection uses regular expressions plus custom
+    validation; each detected span is replaced with a typed token (e.g.
+    `[EMAIL]`). The service has no database, no authentication, and no external
+    PII processing.
+
+
+    This specification documents only behaviour that is implemented in the
+    source. Raw matched PII values are never returned in responses and never
+    logged.
+servers:
+  - url: http://localhost:3000
+    description: Local development server (default PORT=3000)
+tags:
+  - name: Health
+    description: Liveness check.
+  - name: De-identification
+    description: PII detection and token replacement.
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Liveness check
+      description: Returns a static status payload indicating the service is up.
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                ok:
+                  value:
+                    status: ok
+  /deidentify:
+    post:
+      tags:
+        - De-identification
+      summary: De-identify PII in text
+      description: >
+        Detects PII in the supplied `text` and returns a copy with each
+        detected span replaced by a typed token. Optionally restricts detection
+        to a subset of entity types via `entities`.
+
+
+        **Default entity selection:** when `entities` is omitted, all six
+        supported entity types are detected. When `entities` is an empty array
+        `[]`, no detection is performed and the text is returned unchanged with
+        `entitiesDetected: {}`.
+
+
+        **Request size:** the JSON body parser enforces a default limit of
+        100 KB. A larger body is rejected before reaching the handler (see the
+        `413` response).
+      operationId: deidentify
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeidentifyRequest'
+            examples:
+              defaultSelection:
+                summary: Default selection (entities omitted -> all six types)
+                value:
+                  text: Contact john@example.com or 123-45-6789
+              entitySelection:
+                summary: Restrict detection to specific entity types
+                value:
+                  text: john@example.com 123-45-6789
+                  entities:
+                    - SSN
+              emptySelection:
+                summary: Empty selection (detects nothing)
+                value:
+                  text: email john@example.com
+                  entities: []
+      responses:
+        '200':
+          description: >
+            De-identified result. Always returned for a well-formed request,
+            including when no PII is detected (text is then unchanged and
+            `entitiesDetected` is `{}`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeidentifyResponse'
+              examples:
+                multipleEntities:
+                  summary: Two entity types detected (default selection)
+                  value:
+                    deidentifiedText: Contact [EMAIL] or [SSN]
+                    entitiesDetected:
+                      EMAIL: 1
+                      SSN: 1
+                entitySelection:
+                  summary: Only the selected type is replaced
+                  value:
+                    deidentifiedText: john@example.com [SSN]
+                    entitiesDetected:
+                      SSN: 1
+                noDetection:
+                  summary: Empty selection or no PII present
+                  value:
+                    deidentifiedText: email john@example.com
+                    entitiesDetected: {}
+        '400':
+          description: >
+            Validation failure or malformed request. Returned for: a body that
+            is not a JSON object; a missing, empty, non-string `text`; an
+            invalid `entities` value; malformed JSON; or a non-JSON
+            Content-Type. The `message` string depends on which check failed
+            (see examples).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingOrInvalidText:
+                  summary: Missing, empty, null, or non-string text
+                  value:
+                    status: error
+                    message: Field "text" is required and must be a non-empty string.
+                invalidEntities:
+                  summary: entities is not an array of supported identifiers
+                  value:
+                    status: error
+                    message: Field "entities" must be an array of supported entity types.
+                bodyNotObject:
+                  summary: Body is not a JSON object (e.g. non-JSON Content-Type)
+                  value:
+                    status: error
+                    message: Request body must be a JSON object.
+                malformedJson:
+                  summary: Body could not be parsed as JSON (from error middleware)
+                  value:
+                    status: error
+                    message: Invalid request body.
+        '413':
+          description: >
+            Request body exceeds the JSON parser's 100 KB limit. The HTTP status
+            is 413, but the body carries the error middleware's generic
+            message.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                payloadTooLarge:
+                  value:
+                    status: error
+                    message: Internal server error.
+components:
+  schemas:
+    EntityType:
+      type: string
+      description: Supported PII entity identifiers. Case-sensitive (upper-case only).
+      enum:
+        - EMAIL
+        - PHONE
+        - SSN
+        - DATE_OF_BIRTH
+        - CREDIT_CARD
+        - IP_ADDRESS
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          const: ok
+    DeidentifyRequest:
+      type: object
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: Non-empty free text to de-identify.
+        entities:
+          type: array
+          description: >
+            Optional. Restricts detection to these entity types. Omit to detect
+            all six supported types. An empty array detects nothing.
+          items:
+            $ref: '#/components/schemas/EntityType'
+      description: >
+        Only `text` and `entities` are read. Additional properties are accepted
+        but ignored by the implementation (not rejected).
+    DeidentifyResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - deidentifiedText
+        - entitiesDetected
+      description: >
+        The public response exposes only the de-identified text and the
+        per-type replacement counts. Detection spans (offsets and raw matched
+        values) are used internally by the domain pipeline and are never
+        returned.
+      properties:
+        deidentifiedText:
+          type: string
+          description: The input text with each resolved span replaced by a token.
+        entitiesDetected:
+          type: object
+          description: >
+            Maps each detected entity type to the number of resolved
+            occurrences replaced. Only types with at least one replacement are
+            present; no detections yields `{}`.
+          additionalProperties:
+            type: integer
+            minimum: 1
+          propertyNames:
+            $ref: '#/components/schemas/EntityType'
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: string
+          const: error
+        message:
+          type: string
+          description: Human-readable error classification. Never contains input text or PII.

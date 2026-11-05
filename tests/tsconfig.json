@@ -1,0 +1,9 @@
+{
+  // Editor-facing config for test files. VS Code associates each file with the
+  // nearest `tsconfig.json`; for files under tests/ that is THIS file. It
+  // delegates to the root test config so there is a single source of truth,
+  // which includes tests/** (and the src/** they import) under the project's
+  // strict, ES2021 options with @types/jest available — so `describe`, `it`,
+  // `expect` and `jest` resolve in the editor. Type-check only (noEmit).
+  "extends": "../tsconfig.test.json"
+}

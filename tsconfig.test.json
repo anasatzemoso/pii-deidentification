@@ -1,0 +1,19 @@
+{
+  // Editor/CI type-checking for tests. Extends the application config so all
+  // strict settings and the ES2021 target are inherited unchanged. This config
+  // is for type-checking only (noEmit); it does not affect `npm run build`,
+  // which still uses tsconfig.json and emits only src/** to dist/.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The base sets rootDir to ./src. Test files live outside src, so widen
+    // rootDir to the project root to avoid TS6059 ("not under rootDir").
+    "rootDir": ".",
+    // Type-checking only; never emit from this config.
+    "noEmit": true
+  },
+  // `include`/`exclude` replace (do not merge with) the base. Cover both the
+  // test files and the source files they import so the editor resolves them
+  // under the project's real compiler options.
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
